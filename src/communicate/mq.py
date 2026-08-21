@@ -190,17 +190,42 @@ class AsyncClient:
         await self._close()
 
     async def connect(self):
-        max_retries = 3
+        """Connect to the queue, retrying while it is still coming up.
+
+        Callers are started in parallel with the server — `task run:local` in
+        voiceChannel launches the MQ, the agent and the model server at once —
+        so "connection refused" here means "not listening yet", not "not
+        coming".
+
+        The except clause is OSError rather than ConnectionError on purpose.
+        When the host resolves to more than one address, which `localhost`
+        does on macOS (::1 and 127.0.0.1), asyncio does not re-raise the
+        per-address ConnectionRefusedError. It collects the failures and
+        raises a bare OSError instead:
+
+            OSError: Multiple exceptions: [Errno 61] Connect call failed
+            ('::1', 7777, 0, 0), [Errno 61] Connect call failed
+            ('127.0.0.1', 7777)
+
+        OSError is ConnectionError's parent, not its child, so `except
+        ConnectionError` never saw it and this loop gave up on the first
+        attempt — on exactly the dual-stack machines the retry exists for.
+        A Linux box where localhost is IPv4-only takes the single-address
+        path, raises ConnectionRefusedError, and retried correctly, which is
+        why CI never showed this.
+        """
+        max_retries = 6
         retry_delay = 1
         backoff_factor = 2  # Each retry waits longer
-        
+        max_delay = 8  # ...up to a ceiling, so six attempts span ~23s not ~63s
+
         for attempt in range(max_retries):
             try:
                 self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
                 print(f"Successfully connected to {self.host}:{self.port}")
                 return
-            except ConnectionError as e:
-                wait_time = retry_delay * (backoff_factor ** attempt)
+            except OSError as e:
+                wait_time = min(retry_delay * (backoff_factor ** attempt), max_delay)
                 print(f"Connection attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
                     print(f"Retrying in {wait_time} seconds...")
