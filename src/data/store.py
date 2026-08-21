@@ -50,10 +50,15 @@ class Bookkeeper:
     def _log_observe(self, observe_message):
         log_path     = self.protected_directory + 'logs/observe.txt'
 
+        # What arrives here is the Send envelope the queue broadcasts, not the
+        # Observe itself: the Observe is JSON inside 'message', and only
+        # 'datetime' belongs to the envelope. Same unpacking as _log_solve.
+        line         = json.loads(observe_message.get('message') or '{}')
+
         server_dt    = observe_message.get('datetime','')
-        message      = observe_message.get('message','')
-        result       = observe_message.get('result','')
-        target       = observe_message.get('target',{})
+        message      = line.get('message','')
+        result       = line.get('result','')
+        target       = line.get('target',{})
 
         target_line = self._serialize_dict(target)
         self._write_line(log_path,

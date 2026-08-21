@@ -16,17 +16,32 @@ def test_observe_is_dispatched_and_written(tmp_path):
     # _log_observe called a method (_serialize_dict) that didn't exist on
     # Bookkeeper, so this would have raised AttributeError the first time
     # anything actually published to the 'observe' topic.
+    #
+    # The payload below is the Send envelope the queue actually broadcasts:
+    # the Observe arrives as JSON inside 'message', and only 'datetime'
+    # belongs to the envelope. An earlier version of this test passed a flat
+    # payload that never occurs on the wire, which is how _log_observe
+    # reading target/result straight off the envelope went unnoticed — it
+    # logged the whole JSON blob as the message and two empty columns.
     directory = str(tmp_path) + "/"
     bookkeeper = Bookkeeper(directory)
+
+    observe = {
+        "topic": "observe",
+        "message": "call outcome",
+        "target": {"prospect": "acme", "call_id": "42"},
+        "result": "meeting_booked",
+    }
 
     _log_line_sync(
         bookkeeper,
         {
             "topic": "observe",
             "datetime": "2026-08-21T00:00:00",
-            "message": "call outcome",
-            "target": {"prospect": "acme", "call_id": "42"},
-            "result": "meeting_booked",
+            "command": "send",
+            "message": json.dumps(observe),
+            "delivery": "one",
+            "index": 0,
         },
     )
 
