@@ -21,13 +21,17 @@ class Bookkeeper:
 
     @staticmethod
     def _serialize_list(in_list:list):
-        line = ';'.join(in_list)
+        line = ';'.join(str(x) for x in in_list)
         return line
-    
+
+    def _serialize_dict(self, in_dict:dict):
+        return self._serialize_list(in_dict.values())
+
     @staticmethod
     def _write_line(filepath, line_items):
         log = '\t'.join(line_items) + '\n'
         log = log.encode('utf-8')
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'ab') as f:
             f.write(log)
   
@@ -43,13 +47,14 @@ class Bookkeeper:
         )
     
 
-    def _log_observe(self, server_dt, observe_message):
+    def _log_observe(self, observe_message):
         log_path     = self.protected_directory + 'logs/observe.txt'
 
+        server_dt    = observe_message.get('datetime','')
         message      = observe_message.get('message','')
         result       = observe_message.get('result','')
         target       = observe_message.get('target',{})
-        
+
         target_line = self._serialize_dict(target)
         self._write_line(log_path,
             [server_dt,message,target_line,result]
@@ -85,6 +90,9 @@ class Bookkeeper:
 
         if topic == 'solve':
             self._log_solve(line)
+
+        if topic == 'observe':
+            self._log_observe(line)
         # Remaining
         # 'logs/subscribe.txt'
 
