@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# Runtime logs. store.py appends here on every query, solve and observe, so a
+# demo run or the test suite leaves the tree dirty and the diff full of local
+# call traffic. The directory is created by _write_line's makedirs and every
+# reader guards on os.path.exists, so nothing needs a placeholder in git.
+src/data/logs/
