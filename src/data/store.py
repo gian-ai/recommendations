@@ -9,10 +9,6 @@ class Bookkeeper:
     def __init__(self, protected_directory):
         self.protected_directory = protected_directory
 
-    def _encode_dict(self, in_dict:dict):
-        line = in_dict.values()
-        line = ';'.join(line)
-        return line
     
     @staticmethod
     def _decode_line(line):
@@ -24,8 +20,16 @@ class Bookkeeper:
         line = ';'.join(str(x) for x in in_list)
         return line
 
-    def _serialize_dict(self, in_dict:dict):
-        return self._serialize_list(in_dict.values())
+    @staticmethod
+    def _serialize_dict(in_dict:dict):
+        """The same encoding Query.encode writes, so observe.txt joins to it.
+
+        This used to drop the keys, which meant an Observe target of
+        {"utterance": ..., "outcome": ...} logged as two values with nothing
+        saying which was which — and #9's ranking joins these logs on exactly
+        that field.
+        """
+        return Observe.serialize_dict(in_dict)
 
     @staticmethod
     def _write_line(filepath, line_items):

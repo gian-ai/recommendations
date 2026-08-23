@@ -51,20 +51,18 @@ async def main():
         query_message = query_message.strip('\n')
         query_id, target_line, choice_type, choices = query_message.split('\t')
 
-        target  = target_line.split(';')
+        target  = Query.deserialize_dict(target_line)
         choices = choices.split(';')
 
-        # target is positional, not keyed — Query.encode()'s wire format
-        # (serialize_dict) joins dict values only, dropping the keys. On
-        # the Go side (voiceChannel/internal/model/query.go's NewQuery)
-        # target is built as {call_id, objection, utterance}, in that
-        # order, so index 2 is the prospect's actual words. This is
-        # fragile — a semicolon inside the utterance text would desync
-        # every field after it — but it matches the existing protocol;
-        # fixing the wire format itself (adding real field names, or
-        # escaping) is out of scope here and affects Query/Solve/Observe
-        # uniformly, not just this agent.
-        utterance = target[2] if len(target) > 2 else ''
+        # Keyed now. target used to arrive positionally, so this read
+        # index 2 and a semicolon inside the utterance desynced every
+        # field after it. serialize_dict encodes JSON, so the name is on
+        # the wire and the text can contain anything.
+        #
+        # deserialize_dict recovers an old positional line under the
+        # convention NewQuery used, which is why this still works against
+        # a log written before the change.
+        utterance = target.get('utterance', '')
 
         prediction, uncertainty = recognizer.select(utterance, choices)
 
