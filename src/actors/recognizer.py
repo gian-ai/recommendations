@@ -47,9 +47,42 @@ class RetrievalRecognizer:
     (#16), so both sides rank in the same embedding space.
     """
 
-    def __init__(self, embed: Embedder, threshold: float = 0.5):
+    def __init__(
+        self,
+        embed: Embedder,
+        threshold: float = 0.5,
+        handoff_above: float = None,
+        index=None,
+    ):
+        """`threshold` and `handoff_above` are the same line, named from the
+        two ends it was named from in two repos.
+
+        This one has always cut on *similarity*: play when `sim >= threshold`.
+        The voice pipeline cuts on *uncertainty*: play when
+        `uncertainty <= handoff_above`. Since `uncertainty = 1 - similarity`
+        those are the same statement, and
+
+            handoff_above = 1 - threshold
+
+        exactly. Both spellings are accepted so neither side has to translate
+        at the call site and get it backwards — passing `handoff_above=0.65`
+        is passing `threshold=0.35`, and the class stores one of them.
+
+        `index` is a `RetrievalIndex`. With one, `select` takes candidate
+        **ids** and resolves them through it; without one it takes candidate
+        **text** and embeds it per call, which is the original behaviour and
+        is kept for callers that have no corpus to index.
+        """
+        if handoff_above is not None:
+            threshold = 1.0 - handoff_above
         self.embed = embed
         self.threshold = threshold
+        self.index = index
+
+    @property
+    def handoff_above(self) -> float:
+        """The same line, expressed as the uncertainty it allows."""
+        return 1.0 - self.threshold
 
     def select(self, utterance: str, candidates: List[str]) -> Tuple[str, float]:
         """Returns (choice, uncertainty).
@@ -70,6 +103,15 @@ class RetrievalRecognizer:
         """
         if not candidates:
             return NO_CHOICE, 1.0
+
+        if self.index is not None:
+            # Candidates are ids into the index, and their text is already
+            # embedded there. One embedding for the turn rather than one per
+            # candidate, which is what #1's 15 ms actually pays for.
+            best_choice, best_sim = self.index.best(utterance, candidates)
+            if not best_choice or best_sim < self.threshold:
+                return NO_CHOICE, 1.0 - max(best_sim, 0.0)
+            return best_choice, 1.0 - best_sim
 
         query_vec = self.embed(utterance)
 
