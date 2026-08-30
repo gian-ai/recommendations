@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from src.communicate.stub import Query
 from src.data.store import Bookkeeper
 
 
@@ -52,16 +53,39 @@ def test_observe_is_dispatched_and_written(tmp_path):
     server_dt, message, target_line, result = line.split("\t")
     assert server_dt == "2026-08-21T00:00:00"
     assert message == "call outcome"
-    assert target_line == "acme;42"
     assert result == "meeting_booked"
 
+    # Keyed, not positional. #9's ranking joins these logs on the target
+    # fields; when they were dumped as "acme;42" nothing on the line said
+    # which value was the prospect and which was the call.
+    assert json.loads(target_line) == {"prospect": "acme", "call_id": "42"}
 
-def test_serialize_dict_handles_non_string_values(tmp_path):
-    # _serialize_list previously joined values with no str() cast, which
-    # crashes on anything but a dict of strings (e.g. a float uncertainty,
-    # or an int call id) — exactly the shape Query/Solve targets carry.
+
+def test_serialize_dict_keeps_types_rather_than_stringifying_them(tmp_path):
+    # The old encoding joined values into text, so a float uncertainty and
+    # the string "0.5" were indistinguishable once logged. JSON keeps them
+    # apart, which matters because these logs are read back and compared.
     bookkeeper = Bookkeeper(str(tmp_path) + "/")
-    assert bookkeeper._serialize_dict({"a": 1, "b": 0.5, "c": "x"}) == "1;0.5;x"
+    encoded = bookkeeper._serialize_dict({"a": 1, "b": 0.5, "c": "x"})
+
+    assert json.loads(encoded) == {"a": 1, "b": 0.5, "c": "x"}
+
+
+def test_a_separator_inside_the_text_cannot_break_the_line(tmp_path):
+    """The failure the old format had and nobody had hit yet.
+
+    Targets carry the prospect's actual words. A tab in a transcript would
+    have desynced every column after it, and a semicolon would have split one
+    value into two — silently, into a log that #9 is supposed to rank from.
+    """
+    bookkeeper = Bookkeeper(str(tmp_path) + "/")
+    hostile = {"utterance": "it is expensive;\tand slow", "call_id": "42"}
+
+    encoded = bookkeeper._serialize_dict(hostile)
+
+    assert "\t" not in encoded, "a tab would desync the columns"
+    assert "\n" not in encoded, "a newline would split the record"
+    assert json.loads(encoded) == hostile
 
 
 def test_query_and_solve_still_dispatch(tmp_path):
@@ -94,3 +118,46 @@ def test_query_and_solve_still_dispatch(tmp_path):
         },
     )
     assert (tmp_path / "logs" / "solve.txt").exists()
+
+
+# ── the wire format for target ───────────────────────────────────────────────
+
+
+def test_a_target_field_survives_the_round_trip_with_its_keys():
+    """The change #49 was blocked on.
+
+    `{"utterance": "that seems expensive", "company": "Acme Corp"}` used to
+    encode as `that seems expensive;Acme Corp`, and the reader joined it back
+    into one string — so the company name became objection vocabulary and BM25
+    scored it. Nothing raised.
+    """
+    target = {"utterance": "that seems expensive", "company": "Acme Corp"}
+
+    assert Query.deserialize_dict(Query.serialize_dict(target)) == target
+
+
+def test_an_old_positional_line_still_decodes():
+    """query.txt and solve.txt already hold thousands of these. A format
+    change that made an existing log unreadable would cost the only real
+    traffic anyone has."""
+    decoded = Query.deserialize_dict("call_7;price;that seems expensive")
+
+    assert decoded == {
+        "call_id": "call_7",
+        "objection": "price",
+        "utterance": "that seems expensive",
+    }
+
+
+def test_an_empty_target_is_an_empty_dict_not_a_crash():
+    assert Query.deserialize_dict("") == {}
+    assert Query.deserialize_dict(None) == {}
+
+
+def test_the_encoding_is_stable_for_the_same_target():
+    """These strings are joined across query.txt, solve.txt and observe.txt,
+    and replayed by #13's harness. Key order changing between runs would
+    break the join silently."""
+    target = {"z": "last", "a": "first", "m": "middle"}
+
+    assert Query.serialize_dict(target) == Query.serialize_dict(dict(reversed(target.items())))
