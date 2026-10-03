@@ -29,6 +29,8 @@ def test_observe_is_dispatched_and_written(tmp_path):
 
     observe = {
         "topic": "observe",
+        "id": "turn_002",
+        "source": "rep",
         "message": "call outcome",
         "target": {"prospect": "acme", "call_id": "42"},
         "result": "meeting_booked",
@@ -50,10 +52,19 @@ def test_observe_is_dispatched_and_written(tmp_path):
     assert log_path.exists(), "observe topic was not dispatched to _log_observe"
 
     line = log_path.read_text().strip()
-    server_dt, message, target_line, result = line.split("\t")
+    server_dt, observe_id, source, message, target_line, result = line.split("\t")
     assert server_dt == "2026-08-21T00:00:00"
     assert message == "call outcome"
     assert result == "meeting_booked"
+
+    # The join key, in the same column position solve.txt puts it, so the two
+    # logs line up without a lookup table.
+    assert observe_id == "turn_002"
+    # And who said so. Without it, the system agreeing with its own choice and
+    # a human correcting it are the same four fields — opposite signals that
+    # read identically, and anything learning from the log trains on its own
+    # guesses.
+    assert source == "rep"
 
     # Keyed, not positional. #9's ranking joins these logs on the target
     # fields; when they were dumped as "acme;42" nothing on the line said
@@ -161,3 +172,35 @@ def test_the_encoding_is_stable_for_the_same_target():
     target = {"z": "last", "a": "first", "m": "middle"}
 
     assert Query.serialize_dict(target) == Query.serialize_dict(dict(reversed(target.items())))
+
+
+def test_an_observation_without_an_id_still_writes(tmp_path):
+    """Both new fields default, so an emitter with no decision in hand — or
+    one written before they existed — logs rather than raising. The columns
+    come out empty, which is the honest answer: nothing to join on."""
+    directory = str(tmp_path) + "/"
+    bookkeeper = Bookkeeper(directory)
+
+    _log_line_sync(
+        bookkeeper,
+        {
+            "topic": "observe",
+            "datetime": "2026-08-21T00:00:00",
+            "command": "send",
+            "message": json.dumps({
+                "topic": "observe",
+                "message": "clip_004",
+                "target": {"utterance": "that is expensive"},
+                "result": "clip_004",
+            }),
+            "delivery": "one",
+            "index": 0,
+        },
+    )
+
+    line = (tmp_path / "logs" / "observe.txt").read_text().strip()
+    server_dt, observe_id, source, message, target_line, result = line.split("\t")
+
+    assert observe_id == ""
+    assert source == ""
+    assert result == "clip_004"

@@ -60,13 +60,18 @@ class Bookkeeper:
         line         = json.loads(observe_message.get('message') or '{}')
 
         server_dt    = observe_message.get('datetime','')
+        observe_id   = line.get('id','')
+        source       = line.get('source','')
         message      = line.get('message','')
         result       = line.get('result','')
         target       = line.get('target',{})
 
+        # id second, matching solve.txt, so the two join on the same column.
+        # source next to it, because the join is only worth making if you can
+        # tell a human's label from the system agreeing with itself.
         target_line = self._serialize_dict(target)
         self._write_line(log_path,
-            [server_dt,message,target_line,result]
+            [server_dt,observe_id,source,message,target_line,result]
         )
 
 
