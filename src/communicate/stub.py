@@ -76,6 +76,18 @@ class Internal(BaseModel):
 
 class Observe(BaseModel):
     topic:str='observe'
+    # The Solve this is about. Without it an observation cannot be joined to
+    # the decision it concerns, and the only substitute is matching on the
+    # target text — the one field the tab-and-semicolon wire format can
+    # corrupt. Defaulted so an emitter that has no decision in hand, or one
+    # written before this field existed, still encodes.
+    id:str=''
+    # Who said so. An observation from the system agreeing with its own choice
+    # and one from a human correcting it are the same four fields otherwise,
+    # and they are opposite signals: the first is the model's opinion coming
+    # back, the second is a label. Anything learning from this has to be able
+    # to tell them apart, or it trains on its own guesses.
+    source:str=''
     message:str
     target:dict
     result:str
